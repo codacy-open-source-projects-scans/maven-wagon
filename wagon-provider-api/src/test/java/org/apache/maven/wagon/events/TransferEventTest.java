@@ -79,7 +79,7 @@ public class TransferEventTest extends TestCase {
 
         event.setResource(null);
 
-        assertEquals(null, event.getResource());
+        assertNull(event.getResource());
 
         res.setName("/foo/baa");
 
@@ -104,7 +104,7 @@ public class TransferEventTest extends TestCase {
 
             fail("Exception expected");
         } catch (IllegalArgumentException e) {
-            assertTrue(true);
+            assertNotNull(e.getMessage());
         }
 
         event.setEventType(TransferEvent.TRANSFER_COMPLETED);
@@ -128,7 +128,7 @@ public class TransferEventTest extends TestCase {
 
             fail("Exception expected");
         } catch (IllegalArgumentException e) {
-            assertTrue(true);
+            assertNotNull(e.getMessage());
         }
     }
 

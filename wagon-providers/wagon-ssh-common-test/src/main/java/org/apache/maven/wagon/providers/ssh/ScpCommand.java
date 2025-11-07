@@ -110,9 +110,6 @@ public class ScpCommand implements Command, Runnable, FileSystemAware {
                             optD = true;
                             break;
                         default:
-                            //                            error = new IOException("Unsupported option: " +
-                            // args[i].charAt(j));
-                            //                            return;
                     }
                 }
             } else if (i == args.length - 1) {
@@ -263,7 +260,6 @@ public class ScpCommand implements Command, Runnable, FileSystemAware {
             throw new IOException("Expected a D message but got '" + header + "'");
         }
 
-        String perms = header.substring(1, 5);
         int length = Integer.parseInt(header.substring(6, header.indexOf(' ', 6)));
         String name = header.substring(header.indexOf(' ', 6) + 1);
 
@@ -309,7 +305,6 @@ public class ScpCommand implements Command, Runnable, FileSystemAware {
             throw new IOException("Expected a C message but got '" + header + "'");
         }
 
-        String perms = header.substring(1, 5);
         long length = Long.parseLong(header.substring(6, header.indexOf(' ', 6)));
         String name = header.substring(header.indexOf(' ', 6) + 1);
 

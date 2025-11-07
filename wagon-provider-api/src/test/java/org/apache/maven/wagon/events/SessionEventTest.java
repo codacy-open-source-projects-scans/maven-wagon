@@ -57,7 +57,7 @@ public class SessionEventTest extends TestCase {
         assertEquals(exception, event.getException());
 
         event.setException(null);
-        assertEquals(null, event.getException());
+        assertNull(event.getException());
 
         event.setException(exception);
         assertEquals(exception, event.getException());
@@ -96,7 +96,7 @@ public class SessionEventTest extends TestCase {
             event.setEventType(-1);
             fail("Exception expected");
         } catch (IllegalArgumentException e) {
-            assertTrue(true);
+            assertNotNull(e.getMessage());
         }
     }
 

@@ -21,8 +21,8 @@ package org.apache.maven.wagon;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 import junit.framework.TestCase;
 import org.apache.maven.wagon.authentication.AuthenticationException;
@@ -37,11 +37,17 @@ import org.apache.maven.wagon.proxy.ProxyInfoProvider;
 import org.apache.maven.wagon.repository.Repository;
 import org.apache.maven.wagon.repository.RepositoryPermissions;
 import org.apache.maven.wagon.resource.Resource;
-import org.codehaus.plexus.util.FileUtils;
-import org.codehaus.plexus.util.IOUtil;
 import org.easymock.IAnswer;
 
-import static org.easymock.EasyMock.*;
+import static org.easymock.EasyMock.anyInt;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.anyString;
+import static org.easymock.EasyMock.createMock;
+import static org.easymock.EasyMock.eq;
+import static org.easymock.EasyMock.expectLastCall;
+import static org.easymock.EasyMock.getCurrentArguments;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.verify;
 
 /**
  * @author <a href="michal.maczka@dimatics.com">Michal Maczka</a>
@@ -96,6 +102,11 @@ public class AbstractWagonTest extends TestCase {
         transferListener = createMock(TransferListener.class);
 
         wagon.addTransferListener(transferListener);
+    }
+
+    // https://github.com/apache/maven-wagon/issues/178
+    public void testCreateParentDirectories() throws TransferFailedException {
+        wagon.createParentDirectories(new File("foo")); // file has no parent
     }
 
     public void testCalculationOfTransferBufferSize() {
@@ -230,7 +241,7 @@ public class AbstractWagonTest extends TestCase {
             runTestSessionConnectionRefusedEvent(exception);
             fail();
         } catch (ConnectionException e) {
-            assertTrue(true);
+            assertNotNull(e.getMessage());
         }
     }
 
@@ -241,7 +252,7 @@ public class AbstractWagonTest extends TestCase {
             runTestSessionConnectionRefusedEvent(exception);
             fail();
         } catch (AuthenticationException e) {
-            assertTrue(true);
+            assertNotNull(e.getMessage());
         }
     }
 
@@ -286,8 +297,6 @@ public class AbstractWagonTest extends TestCase {
     }
 
     public void testSessionCloseRefusedEventConnectionException() throws Exception {
-        Repository repository = new Repository();
-
         sessionListener.sessionDisconnecting(anyObject(SessionEvent.class));
         sessionListener.sessionError(anyObject(SessionEvent.class));
         replay(sessionListener);
@@ -303,7 +312,7 @@ public class AbstractWagonTest extends TestCase {
             wagon.disconnect();
             fail();
         } catch (ConnectionException e) {
-            assertTrue(true);
+            assertNotNull(e.getMessage());
         } finally {
             verify(sessionListener);
         }
@@ -351,7 +360,7 @@ public class AbstractWagonTest extends TestCase {
 
             fail("Transfer error was expected during deploy");
         } catch (TransferFailedException expected) {
-            assertTrue(true);
+            assertNotNull(expected.getMessage());
         }
 
         verify(transferListener);
@@ -376,28 +385,6 @@ public class AbstractWagonTest extends TestCase {
         wagon.put(source, artifact);
 
         verify(transferListener);
-    }
-
-    public void testStreamShutdown() {
-        IOUtil.close((InputStream) null);
-
-        IOUtil.close((OutputStream) null);
-
-        InputStreamMock inputStream = new InputStreamMock();
-
-        assertFalse(inputStream.isClosed());
-
-        IOUtil.close(inputStream);
-
-        assertTrue(inputStream.isClosed());
-
-        OutputStreamMock outputStream = new OutputStreamMock();
-
-        assertFalse(outputStream.isClosed());
-
-        IOUtil.close(outputStream);
-
-        assertTrue(outputStream.isClosed());
     }
 
     public void testRepositoryPermissionsOverride() throws ConnectionException, AuthenticationException {
@@ -446,7 +433,7 @@ public class AbstractWagonTest extends TestCase {
             wagon.connect(null);
             fail();
         } catch (NullPointerException e) {
-            assertTrue(true);
+            assertNotNull(e.getMessage());
         }
     }
 
@@ -454,7 +441,7 @@ public class AbstractWagonTest extends TestCase {
         File tempFile = File.createTempFile("wagon", "tmp");
         tempFile.deleteOnExit();
         String content = "content";
-        FileUtils.fileWrite(tempFile.getAbsolutePath(), content);
+        Files.write(tempFile.toPath().toAbsolutePath(), content.getBytes(StandardCharsets.UTF_8));
 
         Resource resource = new Resource("resource");
 

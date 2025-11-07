@@ -21,6 +21,7 @@ package org.apache.maven.wagon;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -44,7 +45,17 @@ import org.junit.Assume;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.easymock.EasyMock.*;
+import static org.easymock.EasyMock.anyInt;
+import static org.easymock.EasyMock.anyObject;
+import static org.easymock.EasyMock.anyString;
+import static org.easymock.EasyMock.createMock;
+import static org.easymock.EasyMock.eq;
+import static org.easymock.EasyMock.expectLastCall;
+import static org.easymock.EasyMock.getCurrentArguments;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.reset;
+import static org.easymock.EasyMock.verify;
+import static org.junit.Assert.assertArrayEquals;
 
 /**
  * @author <a href="mailto:jason@maven.org">Jason van Zyl</a>
@@ -316,9 +327,9 @@ public abstract class WagonTestCase extends PlexusTestCase {
             // the repository with the contents of the artifact that was
             // retrieved from the repository.
 
-            String sourceContent = FileUtils.fileRead(sourceFile);
-            String destContent = FileUtils.fileRead(destFile);
-            assertEquals(sourceContent, destContent);
+            byte[] sourceContent = Files.readAllBytes(sourceFile.toPath());
+            byte[] destContent = Files.readAllBytes(destFile.toPath());
+            assertArrayEquals(sourceContent, destContent);
         } else {
             verify(mockTransferListener);
 
@@ -337,9 +348,6 @@ public abstract class WagonTestCase extends PlexusTestCase {
         resource = new Resource(this.resource);
         resource.setContentLength(getExpectedContentLengthOnGet(expectedSize));
         resource.setLastModified(getExpectedLastModifiedOnGet(testRepository, resource));
-        // TODO: transfer skipped event?
-        // mockTransferListener.transferSkipped( createTransferEvent( wagon, resource, TransferEvent.TRANSFER_STARTED,
-        // TransferEvent.REQUEST_GET, destFile ) );
 
         mockTransferListener.debug(anyString());
         expectLastCall().anyTimes();
@@ -574,7 +582,7 @@ public abstract class WagonTestCase extends PlexusTestCase {
     private void writeTestFile(String child) throws IOException {
         File dir = new File(sourceFile, child);
         dir.getParentFile().mkdirs();
-        FileUtils.fileWrite(dir.getAbsolutePath(), child);
+        Files.write(dir.toPath().toAbsolutePath(), child.getBytes());
     }
 
     public void testFailedGet() throws Exception {
@@ -674,7 +682,7 @@ public abstract class WagonTestCase extends PlexusTestCase {
             // WAGON-250
             list = wagon.getFileList("");
             assertNotNull("file list should not be null.", list);
-            assertTrue("file list should contain items (actually contains '" + list + "').", !list.isEmpty());
+            assertFalse("file list should contain items (actually contains '" + list + "').", list.isEmpty());
             assertTrue(list.contains("file-list/"));
             assertFalse(list.contains("file-list"));
             assertFalse(list.contains("."));
@@ -779,7 +787,7 @@ public abstract class WagonTestCase extends PlexusTestCase {
     protected void putFile(String resourceName, String testFileName, String content) throws Exception {
         sourceFile = new File(FileTestUtils.getTestOutputDir(), testFileName);
         sourceFile.getParentFile().mkdirs();
-        FileUtils.fileWrite(sourceFile.getAbsolutePath(), content);
+        Files.write(sourceFile.toPath().toAbsolutePath(), content.getBytes());
 
         Wagon wagon = getWagon();
 
@@ -949,15 +957,13 @@ public abstract class WagonTestCase extends PlexusTestCase {
 
         assertEquals("compare checksums", TEST_CKSUM, checksumObserver.getActualChecksum());
 
-        // Now compare the conents of the artifact that was placed in
+        // Now compare the contents of the artifact that was placed in
         // the repository with the contents of the artifact that was
         // retrieved from the repository.
 
-        String sourceContent = FileUtils.fileRead(sourceFile);
-
-        String destContent = FileUtils.fileRead(destFile);
-
-        assertEquals(sourceContent, destContent);
+        byte[] sourceContent = Files.readAllBytes(sourceFile.toPath());
+        byte[] destContent = Files.readAllBytes(destFile.toPath());
+        assertArrayEquals(sourceContent, destContent);
     }
 
     // ----------------------------------------------------------------------
