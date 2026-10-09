@@ -18,9 +18,12 @@
  */
 package org.apache.maven.wagon.providers.http;
 
+import javax.inject.Named;
+
 import org.apache.maven.wagon.shared.http.AbstractHttpClientWagon;
 
 /**
  * @author <a href="michal.maczka@dimatics.com">Michal Maczka</a>
  */
+@Named("http")
 public class HttpWagon extends AbstractHttpClientWagon {}

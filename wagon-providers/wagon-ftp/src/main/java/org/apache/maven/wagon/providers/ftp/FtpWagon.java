@@ -18,6 +18,8 @@
  */
 package org.apache.maven.wagon.providers.ftp;
 
+import javax.inject.Named;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -52,21 +54,13 @@ import org.apache.maven.wagon.resource.Resource;
  * FtpWagon
  *
  *
- * @plexus.component role="org.apache.maven.wagon.Wagon"
- * role-hint="ftp"
- * instantiation-strategy="per-lookup"
  */
+@Named("ftp")
 public class FtpWagon extends StreamWagon {
     private FTPClient ftp;
 
-    /**
-     * @plexus.configuration default-value="true"
-     */
     private boolean passiveMode = true;
 
-    /**
-     * @plexus.configuration default-value="ISO-8859-1"
-     */
     private String controlEncoding = FTP.DEFAULT_CONTROL_ENCODING;
 
     public boolean isPassiveMode() {
@@ -147,6 +141,8 @@ public class FtpWagon extends StreamWagon {
                 throw new AuthenticationException("Cannot login to remote system");
             }
 
+            afterLogin(ftp);
+
             fireSessionDebug("Remote system is " + ftp.getSystemName());
 
             // Set to binary mode.
@@ -165,6 +161,17 @@ public class FtpWagon extends StreamWagon {
 
     protected FTPClient createClient() {
         return new FTPClient();
+    }
+
+    /**
+     * Negotiates anything that can only be negotiated once the session is authenticated. Called after a successful
+     * login and before the session is configured for transfer. Does nothing for plain FTP.
+     *
+     * @param client the connected and authenticated client
+     * @throws IOException if the negotiation fails
+     */
+    protected void afterLogin(FTPClient client) throws IOException {
+        // nothing to do
     }
 
     @Override
@@ -345,9 +352,6 @@ public class FtpWagon extends StreamWagon {
         }
     }
 
-    /**
-     *
-     */
     public class PrintCommandListener implements ProtocolCommandListener {
         private FtpWagon wagon;
 

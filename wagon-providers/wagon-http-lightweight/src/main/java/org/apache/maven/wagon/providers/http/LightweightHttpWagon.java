@@ -18,6 +18,9 @@
  */
 package org.apache.maven.wagon.providers.http;
 
+import javax.inject.Inject;
+import javax.inject.Named;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,6 +34,7 @@ import java.net.Proxy.Type;
 import java.net.SocketAddress;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Properties;
 import java.util.regex.Matcher;
@@ -50,7 +54,6 @@ import org.apache.maven.wagon.events.TransferEvent;
 import org.apache.maven.wagon.proxy.ProxyInfo;
 import org.apache.maven.wagon.resource.Resource;
 import org.apache.maven.wagon.shared.http.EncodingUtil;
-import org.codehaus.plexus.util.Base64;
 
 import static java.lang.Integer.parseInt;
 import static org.apache.maven.wagon.shared.http.HttpMessageUtils.UNKNOWN_STATUS_CODE;
@@ -62,9 +65,9 @@ import static org.apache.maven.wagon.shared.http.HttpMessageUtils.formatTransfer
  * LightweightHttpWagon, using JDK's HttpURLConnection.
  *
  * @author <a href="michal.maczka@dimatics.com">Michal Maczka</a>
- * @plexus.component role="org.apache.maven.wagon.Wagon" role-hint="http" instantiation-strategy="per-lookup"
  * @see HttpURLConnection
  */
+@Named("http")
 public class LightweightHttpWagon extends StreamWagon {
     private boolean preemptiveAuthentication;
 
@@ -80,18 +83,12 @@ public class LightweightHttpWagon extends StreamWagon {
     /**
      * Whether to use any proxy cache or not.
      *
-     * @plexus.configuration default="false"
      */
     private boolean useCache;
 
-    /**
-     * @plexus.configuration
-     */
     private Properties httpHeaders;
 
-    /**
-     * @plexus.requirement
-     */
+    @Inject
     private volatile LightweightHttpWagonAuthenticator authenticator;
 
     /**
@@ -204,7 +201,7 @@ public class LightweightHttpWagon extends StreamWagon {
     private void setAuthorization(HttpURLConnection urlConnection) {
         if (preemptiveAuthentication && authenticationInfo != null && authenticationInfo.getUserName() != null) {
             String credentials = authenticationInfo.getUserName() + ":" + authenticationInfo.getPassword();
-            String encoded = new String(Base64.encodeBase64(credentials.getBytes()));
+            String encoded = Base64.getEncoder().encodeToString(credentials.getBytes());
             urlConnection.setRequestProperty("Authorization", "Basic " + encoded);
         }
     }

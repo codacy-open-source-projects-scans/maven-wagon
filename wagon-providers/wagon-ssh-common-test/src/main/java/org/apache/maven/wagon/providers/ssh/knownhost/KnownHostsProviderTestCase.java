@@ -18,16 +18,37 @@
  */
 package org.apache.maven.wagon.providers.ssh.knownhost;
 
-import org.apache.maven.wagon.Wagon;
+import javax.inject.Inject;
+
 import org.apache.maven.wagon.providers.ssh.SshWagon;
 import org.apache.maven.wagon.providers.ssh.TestData;
 import org.apache.maven.wagon.repository.Repository;
-import org.codehaus.plexus.PlexusTestCase;
+import org.codehaus.plexus.ContainerConfiguration;
+import org.codehaus.plexus.PlexusConstants;
+import org.codehaus.plexus.PlexusContainer;
+import org.codehaus.plexus.testing.PlexusTest;
+import org.codehaus.plexus.testing.PlexusTestConfiguration;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  *
  */
-public class KnownHostsProviderTestCase extends PlexusTestCase {
+@PlexusTest
+public class KnownHostsProviderTestCase implements PlexusTestConfiguration {
+
+    @Inject
+    private PlexusContainer container;
+
+    @Override
+    public void customizeConfiguration(ContainerConfiguration configuration) {
+        // the providers are @Named beans now, so the container has to read META-INF/sisu
+        configuration.setClassPathScanning(PlexusConstants.SCANNING_INDEX);
+    }
+
     protected KnownHostsProvider okHostsProvider;
 
     protected KnownHostsProvider failHostsProvider;
@@ -52,6 +73,7 @@ public class KnownHostsProviderTestCase extends PlexusTestCase {
      *
      * @throws Exception on error
      */
+    @Test
     public void testIncorrectKey() throws Exception {
         wagon.setKnownHostsProvider(failHostsProvider);
 
@@ -69,6 +91,7 @@ public class KnownHostsProviderTestCase extends PlexusTestCase {
      *
      * @throws Exception on error
      */
+    @Test
     public void testChangedKey() throws Exception {
         wagon.setKnownHostsProvider(changedHostsProvider);
 
@@ -86,6 +109,7 @@ public class KnownHostsProviderTestCase extends PlexusTestCase {
      *
      * @throws Exception on error
      */
+    @Test
     public void testCorrectKey() throws Exception {
         wagon.setKnownHostsProvider(okHostsProvider);
 
@@ -94,11 +118,11 @@ public class KnownHostsProviderTestCase extends PlexusTestCase {
         assertTrue(true);
     }
 
-    protected void setUp() throws Exception {
-        super.setUp();
+    @BeforeEach
+    public void setUp() throws Exception {
         source = new Repository("test", "scp://" + TestData.getUserName() + "@" + TestData.getHostname() + "/tmp/foo");
 
-        wagon = (SshWagon) lookup(Wagon.ROLE, "scp");
+        wagon = container.lookup(SshWagon.class, "scp");
         wagon.setInteractive(false);
 
         this.okHostsProvider = new SingleKnownHostProvider(TestData.getHostname(), CORRECT_KEY);

@@ -1,0 +1,256 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+package org.apache.maven.wagon.providers.webdav;
+
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
+import org.xml.sax.helpers.DefaultHandler;
+
+import static org.apache.maven.wagon.providers.webdav.DavMethods.DAV_NAMESPACE;
+import static org.apache.maven.wagon.providers.webdav.DavMethods.PROPERTY_RESOURCETYPE;
+import static org.apache.maven.wagon.providers.webdav.DavMethods.XML_COLLECTION;
+
+/**
+ * The {@code 207 Multi-Status} body of a PROPFIND response, reduced to what this Wagon needs: the
+ * href of each response, in document order, and whether that response describes a collection.
+ * <p>
+ * Responses keep their document order because {@code getFileList} skips the first one, taking it to
+ * be the requested collection itself. RFC 4918 does not order responses; that a server lists the
+ * request URI first is an observed behaviour, and the assumption predates this class.
+ *
+ * @since 4.0.0
+ */
+final class MultiStatus {
+
+    private static final String DISALLOW_DOCTYPE_DECL = "http://apache.org/xml/features/disallow-doctype-decl";
+
+    private static final String EXTERNAL_GENERAL_ENTITIES = "http://xml.org/sax/features/external-general-entities";
+
+    private static final String EXTERNAL_PARAMETER_ENTITIES = "http://xml.org/sax/features/external-parameter-entities";
+
+    private final List<Response> responses;
+
+    private MultiStatus(List<Response> responses) {
+        this.responses = responses;
+    }
+
+    /**
+     * A single {@code DAV:response} element.
+     */
+    static final class Response {
+        private final String href;
+        private final boolean collection;
+
+        Response(String href, boolean collection) {
+            this.href = href;
+            this.collection = collection;
+        }
+
+        String getHref() {
+            return href;
+        }
+
+        /**
+         * Whether the {@code resourcetype} property carried a {@code collection} child. Only
+         * {@code propstat} elements with a {@code 200} status are considered; a resource whose
+         * {@code resourcetype} is absent or empty is not a collection.
+         */
+        boolean isCollection() {
+            return collection;
+        }
+    }
+
+    List<Response> getResponses() {
+        return responses;
+    }
+
+    /**
+     * Parses a multistatus document.
+     *
+     * @param in the response body, never {@code null}
+     * @return the parsed responses, possibly empty but never {@code null}
+     * @throws IOException if the parser cannot be configured, or if the body is not a well-formed
+     *     multistatus document
+     */
+    static MultiStatus parse(InputStream in) throws IOException {
+        DocumentBuilder builder;
+        try {
+            builder = newDocumentBuilder();
+        } catch (ParserConfigurationException e) {
+            // a configuration problem is not the server's fault, so say so rather than blaming the
+            // response body
+            throw new IOException("XML parser configuration error: " + e.getMessage(), e);
+        }
+
+        Document document;
+        try {
+            document = builder.parse(in);
+        } catch (SAXException e) {
+            throw new IOException("Cannot parse multistatus response: " + e.getMessage(), e);
+        }
+
+        Element root = document.getDocumentElement();
+        if (root == null || !isDavElement(root, "multistatus")) {
+            throw new IOException("Expected a DAV:multistatus response body");
+        }
+
+        // an href must occur only once per RFC 4918; should a server repeat one, the last wins and
+        // keeps the position of the first, which is what the Jackrabbit-backed code did. A
+        // LinkedHashMap also preserves the document order the callers depend on.
+        Map<String, Response> responses = new LinkedHashMap<>();
+        for (Element response : childElements(root, "response")) {
+            String href = null;
+            for (Element hrefElement : childElements(response, "href")) {
+                href = hrefElement.getTextContent();
+                break;
+            }
+            if (href == null || href.trim().isEmpty()) {
+                // dropping it would move the next response into its place, and the callers read
+                // meaning into that position
+                throw new IOException("Multi-Status response without a DAV:href");
+            }
+            href = href.trim();
+            responses.put(href, new Response(href, isCollection(response)));
+        }
+        return new MultiStatus(Collections.unmodifiableList(new ArrayList<>(responses.values())));
+    }
+
+    /**
+     * Looks for {@code resourcetype/collection} inside any {@code propstat} that reported a
+     * {@code 200} status.
+     */
+    private static boolean isCollection(Element response) {
+        for (Element propstat : childElements(response, "propstat")) {
+            if (!isOkStatus(propstat)) {
+                continue;
+            }
+            for (Element prop : childElements(propstat, "prop")) {
+                for (Element resourceType : childElements(prop, PROPERTY_RESOURCETYPE)) {
+                    if (!childElements(resourceType, XML_COLLECTION).isEmpty()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Reads the {@code status} child, whose text is a status line such as {@code HTTP/1.1 200 OK}.
+     * RFC 4918 requires the element, and a {@code propstat} lacking one reports no success for the
+     * properties it carries, so they are not read.
+     */
+    private static boolean isOkStatus(Element propstat) {
+        List<Element> statusElements = childElements(propstat, "status");
+        if (statusElements.isEmpty()) {
+            return false;
+        }
+        String[] tokens = statusElements.get(0).getTextContent().trim().split("\\s+");
+        for (String token : tokens) {
+            if (token.length() == 3 && token.chars().allMatch(Character::isDigit)) {
+                return "200".equals(token);
+            }
+        }
+        return false;
+    }
+
+    private static List<Element> childElements(Element parent, String localName) {
+        List<Element> elements = new ArrayList<>();
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE && isDavElement((Element) child, localName)) {
+                elements.add((Element) child);
+            }
+        }
+        return elements;
+    }
+
+    /**
+     * Matches on local name within the {@code DAV:} namespace. Servers that emit the WebDAV
+     * elements in no namespace at all are tolerated, since some do; Jackrabbit required
+     * {@code DAV:} exactly.
+     */
+    private static boolean isDavElement(Element element, String localName) {
+        // the parser is namespace aware, so a parsed element always reports a local name
+        if (!localName.equals(element.getLocalName())) {
+            return false;
+        }
+        String namespace = element.getNamespaceURI();
+        return namespace == null || DAV_NAMESPACE.equals(namespace);
+    }
+
+    private static DocumentBuilder newDocumentBuilder() throws ParserConfigurationException {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        // multistatus bodies come from a remote server, so no external entity resolution
+        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        // the parser in use is not necessarily Xerces, and setFeature rejects features it does not
+        // know, so where the doctype cannot be banned outright, refuse external entities instead
+        if (!setFeatureIfSupported(factory, DISALLOW_DOCTYPE_DECL, true)) {
+            boolean generalEntities = setFeatureIfSupported(factory, EXTERNAL_GENERAL_ENTITIES, false);
+            boolean parameterEntities = setFeatureIfSupported(factory, EXTERNAL_PARAMETER_ENTITIES, false);
+            if (!generalEntities || !parameterEntities) {
+                // secure processing on its own bounds resource use, it does not stop a remote
+                // server reaching the entities it names, so refuse to parse at all
+                throw new ParserConfigurationException("XML parser supports neither " + DISALLOW_DOCTYPE_DECL
+                        + " nor the external entity features, and cannot be secured");
+            }
+            // neither of those governs the external DTD subset itself
+            try {
+                factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            } catch (IllegalArgumentException e) {
+                // property unrecognised; the entity features above still hold
+            }
+        }
+        factory.setXIncludeAware(false);
+        factory.setExpandEntityReferences(false);
+        factory.setNamespaceAware(true);
+
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        // without a handler the parser writes its own diagnostics to stderr; fatal errors still
+        // surface as an exception
+        builder.setErrorHandler(new DefaultHandler());
+        return builder;
+    }
+
+    private static boolean setFeatureIfSupported(DocumentBuilderFactory factory, String feature, boolean value) {
+        try {
+            factory.setFeature(feature, value);
+            return true;
+        } catch (ParserConfigurationException e) {
+            return false;
+        }
+    }
+}

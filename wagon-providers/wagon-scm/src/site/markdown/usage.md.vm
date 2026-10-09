@@ -1,0 +1,188 @@
+---
+title: Maven Wagon SCM
+author: 
+  - Carlos Sanchez
+date: 2011-09-22
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Maven Wagon SCM Usage
+
+You need to add some extensions to your pom:
+
+- `wagon-scm`,
+- [`maven-scm-manager-plexus`](/scm/maven-scm-managers/maven-scm-manager-plexus/index.html)
+- and the [Maven SCM Provider](/scm/maven-scm-providers/index.html) for your SCM system,
+
+and use URLs in the [SCM format](/scm/scm-url-format.html).
+
+For non-subversion SCM, you can include the elements `scmVersionType` and `scmVersion` in your `settings.xml` file to specify a branch or tag to use. The value of `scmVersionType` must be one of `branch` or `tag`. There is no default value for `scmVersionType` so you _MUST_ specify it with `scmVersion` in order to have any effect.
+
+# Deploying your Maven site to SCM
+
+There are some **shortcomings** to simply using Wagon SCM provider with site plugin:
+
+- deploying site to SCM will require obsolete pages deletion, which is not done,
+- site plugin way make one commit per file.
+
+**Prefer [maven-scm-publish-plugin](http://maven.apache.org/plugins/maven-scm-publish-plugin/) to publish your site to SCM**
+
+The site plugin behaves differently, require these be added as dependencies instead of extensions. See [ Adding a Protocol to Deploy the Site](/plugins/maven-site-plugin/examples/adding-deploy-protocol.html).
+
+Deploying your Maven site to Subversion
+---------------------------------------
+
+Add the following extensions to your pom and use a wagon-scm url in the distributionManagement site url.
+
+```
+  <build>
+    <extensions>
+      <extension>
+        <groupId>org.apache.maven.wagon</groupId>
+        <artifactId>wagon-scm</artifactId>
+        <version>${project.version}</version>
+      </extension>
+      <extension>
+        <groupId>org.apache.maven.scm</groupId>
+        <artifactId>maven-scm-manager-plexus</artifactId>
+        <version>${mavenScmVersion}</version>
+      </extension>
+      <extension>
+        <groupId>org.apache.maven.scm</groupId>
+        <artifactId>maven-scm-provider-svnexe</artifactId>
+        <version>${mavenScmVersion}</version>
+      </extension>
+    </extensions>
+  </build>
+  <distributionManagement>
+    <site>
+      <id>my.svn.server</id>
+      <url>scm:svn:https://username@svn.apache.org/svn/root/module</url>
+    </site>
+  </distributionManagement>
+```
+
+Deploying your Maven site to Git
+--------------------------------
+
+Same as before, but changing svnexe to gitexe and using a Git url.
+
+```
+  <build>
+    <extensions>
+      <extension>
+        <groupId>org.apache.maven.wagon</groupId>
+        <artifactId>wagon-scm</artifactId>
+        <version>${project.version}</version>
+      </extension>
+      <extension>
+        <groupId>org.apache.maven.scm</groupId>
+        <artifactId>maven-scm-manager-plexus</artifactId>
+        <version>${mavenScmVersion}</version>
+      </extension>
+      <extension>
+        <groupId>org.apache.maven.scm</groupId>
+        <artifactId>maven-scm-provider-gitexe</artifactId>
+        <version>${mavenScmVersion}</version>
+      </extension>
+    </extensions>
+  </build>
+  <distributionManagement>
+    <site>
+      <id>my.git.server</id>
+      <url>scm:git:ssh://git@git.example.org/myuser/myproject.git</url>
+    </site>
+  </distributionManagement>
+```
+
+Deploying your Maven site to GitHub's gh-pages
+----------------------------------------------
+
+Same as before, but changing svnexe to gitexe and using a Git url.
+
+```
+  <build>
+    <extensions>
+      <extension>
+        <groupId>org.apache.maven.wagon</groupId>
+        <artifactId>wagon-scm</artifactId>
+        <version>${project.version}</version>
+      </extension>
+      <extension>
+        <groupId>org.apache.maven.scm</groupId>
+        <artifactId>maven-scm-manager-plexus</artifactId>
+        <version>${mavenScmVersion}</version>
+      </extension>
+      <extension>
+        <groupId>org.apache.maven.scm</groupId>
+        <artifactId>maven-scm-provider-gitexe</artifactId>
+        <version>${mavenScmVersion}</version>
+      </extension>
+    </extensions>
+  </build>
+  <distributionManagement>
+    <site>
+      <id>my.git.server</id>
+      <url>scm:git:ssh://git@github.com/myuser/myproject.git</url>
+    </site>
+  </distributionManagement>
+  <!-- if the extension mecanism do not work, use plugin dependency instead -->
+  <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-site-plugin</artifactId>
+        <version>${mavenSitePluginVersion}</version>
+        <dependencies>
+            <dependency>
+                <groupId>org.apache.maven.doxia</groupId>
+                <artifactId>doxia-module-markdown</artifactId>
+                <version>${mavenScmVersion}</version>
+               </dependency>
+            <dependency>
+                <groupId>org.apache.maven.scm</groupId>
+                <artifactId>maven-scm-provider-gitexe</artifactId>
+                <version>${mavenScmVersion}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.maven.wagon</groupId>
+                <artifactId>wagon-scm</artifactId>
+                <version>${mavenScmVersion}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.maven.scm</groupId>
+                <artifactId>maven-scm-manager-plexus</artifactId>
+                <version>${mavenScmVersion}</version>
+            </dependency>
+        </dependencies>
+  </plugin>
+```
+
+And in your settings.xml file:
+
+```
+  <server>
+    <id>my.git.server</id>
+    <username>git</username>
+    <configuration>
+        <scmVersionType>branch</scmVersionType>
+        <scmVersion>gh-pages</scmVersion>
+    </configuration>
+  </server>
+```

@@ -21,8 +21,10 @@ package org.apache.maven.wagon.providers.ftp;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.net.ftp.FTPClient;
 import org.apache.ftpserver.FtpServer;
 import org.apache.ftpserver.FtpServerFactory;
 import org.apache.ftpserver.ftplet.Authority;
@@ -39,6 +41,12 @@ import org.apache.maven.wagon.authentication.AuthenticationException;
 import org.apache.maven.wagon.authentication.AuthenticationInfo;
 import org.apache.maven.wagon.repository.Repository;
 import org.apache.maven.wagon.resource.Resource;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * @author <a href="michal.maczka@dimatics.com">Michal Maczka</a>
@@ -138,6 +146,30 @@ public class FtpWagonTest extends StreamingWagonTestCase {
         return getTestFile("target/test-output/local-repository");
     }
 
+    @Test
+    public void testAfterLoginIsCalledOnConnect() throws Exception {
+        AtomicBoolean called = new AtomicBoolean();
+        FtpWagon wagon = new FtpWagon() {
+            @Override
+            protected void afterLogin(FTPClient client) {
+                called.set(true);
+            }
+        };
+
+        setupWagonTestingFixtures();
+        try {
+            wagon.connect(new Repository("id", getTestRepositoryUrl()), getAuthInfo());
+            try {
+                assertTrue(called.get(), "afterLogin was not called after a successful login");
+            } finally {
+                wagon.disconnect();
+            }
+        } finally {
+            tearDownWagonTestingFixtures();
+        }
+    }
+
+    @Test
     public void testNoPassword() throws Exception {
         AuthenticationInfo authenticationInfo = new AuthenticationInfo();
         authenticationInfo.setUserName("me");
@@ -149,6 +181,7 @@ public class FtpWagonTest extends StreamingWagonTestCase {
         }
     }
 
+    @Test
     public void testDefaultUserName() throws Exception {
         AuthenticationInfo authenticationInfo = new AuthenticationInfo();
         authenticationInfo.setPassword("secret");
@@ -163,6 +196,7 @@ public class FtpWagonTest extends StreamingWagonTestCase {
     /**
      * This is a unit test to show WAGON-265
      */
+    @Test
     public void testPutDirectoryCreation() throws Exception {
         setupWagonTestingFixtures();
 

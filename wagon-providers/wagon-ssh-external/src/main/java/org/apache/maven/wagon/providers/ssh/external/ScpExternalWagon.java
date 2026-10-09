@@ -18,6 +18,8 @@
  */
 package org.apache.maven.wagon.providers.ssh.external;
 
+import javax.inject.Named;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.List;
@@ -31,6 +33,7 @@ import org.apache.maven.wagon.PermissionModeUtils;
 import org.apache.maven.wagon.ResourceDoesNotExistException;
 import org.apache.maven.wagon.Streams;
 import org.apache.maven.wagon.TransferFailedException;
+import org.apache.maven.wagon.Wagon;
 import org.apache.maven.wagon.WagonConstants;
 import org.apache.maven.wagon.authentication.AuthenticationException;
 import org.apache.maven.wagon.authentication.AuthenticationInfo;
@@ -43,6 +46,7 @@ import org.codehaus.plexus.util.StringUtils;
 import org.codehaus.plexus.util.cli.CommandLineException;
 import org.codehaus.plexus.util.cli.CommandLineUtils;
 import org.codehaus.plexus.util.cli.Commandline;
+import org.eclipse.sisu.Typed;
 
 /**
  * SCP deployer using "external" scp program.  To allow for
@@ -50,10 +54,9 @@ import org.codehaus.plexus.util.cli.Commandline;
  *
  * @author <a href="mailto:brett@apache.org">Brett Porter</a>
  * @todo [BP] add compression flag
- * @plexus.component role="org.apache.maven.wagon.Wagon"
- * role-hint="scpexe"
- * instantiation-strategy="per-lookup"
  */
+@Named("scpexe")
+@Typed(Wagon.class)
 public class ScpExternalWagon extends AbstractWagon implements CommandExecutor {
     /**
      * The external SCP command to use - default is <code>scp</code>.
@@ -215,8 +218,8 @@ public class ScpExternalWagon extends AbstractWagon implements CommandExecutor {
         return cl;
     }
 
-    private void executeScpCommand(Resource resource, File localFile, boolean put)
-            throws TransferFailedException, ResourceDoesNotExistException, AuthorizationException {
+    Commandline buildCommandLine(Resource resource, File localFile, boolean put)
+            throws TransferFailedException, AuthorizationException {
         boolean putty = isPuTTYSCP();
 
         File privateKey;
@@ -229,7 +232,20 @@ public class ScpExternalWagon extends AbstractWagon implements CommandExecutor {
         }
         Commandline cl = createBaseCommandLine(putty, scpExecutable, privateKey);
 
-        cl.setWorkingDirectory(localFile.getParentFile().getAbsolutePath());
+        File parentFile = localFile.getParentFile();
+        if (parentFile == null) {
+            try {
+                File abs = localFile.getAbsoluteFile();
+                parentFile = abs.getParentFile();
+            } catch (SecurityException e) {
+                fireTransferError(resource, e, put ? TransferEvent.REQUEST_PUT : TransferEvent.REQUEST_GET);
+
+                throw new TransferFailedException("Error accessing absolute path of " + localFile, e);
+            }
+        }
+        if (parentFile != null) {
+            cl.setWorkingDirectory(parentFile.getAbsolutePath());
+        }
 
         int port =
                 repository.getPort() == WagonConstants.UNKNOWN_PORT ? ScpHelper.DEFAULT_SSH_PORT : repository.getPort();
@@ -254,6 +270,13 @@ public class ScpExternalWagon extends AbstractWagon implements CommandExecutor {
             cl.createArg().setValue(qualifiedRemoteFile);
             cl.createArg().setValue(localFile.getName());
         }
+
+        return cl;
+    }
+
+    private void executeScpCommand(Resource resource, File localFile, boolean put)
+            throws TransferFailedException, ResourceDoesNotExistException, AuthorizationException {
+        Commandline cl = buildCommandLine(resource, localFile, put);
 
         fireSessionDebug("Executing command: " + cl.toString());
 

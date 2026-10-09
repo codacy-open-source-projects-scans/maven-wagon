@@ -18,6 +18,10 @@
  */
 package org.apache.maven.wagon.providers.ftp;
 
+import javax.inject.Named;
+
+import java.io.IOException;
+
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPSClient;
 import org.slf4j.Logger;
@@ -27,27 +31,22 @@ import org.slf4j.LoggerFactory;
  * FtpsWagon
  *
  *
- * @plexus.component role="org.apache.maven.wagon.Wagon"
- * role-hint="ftps"
- * instantiation-strategy="per-lookup"
  */
+@Named("ftps")
 public class FtpsWagon extends FtpWagon {
     private static final Logger LOG = LoggerFactory.getLogger(FtpsWagon.class);
 
-    /**
-     * @plexus.configuration default-value="TLS"
-     */
     private String securityProtocol = "TLS";
 
-    /**
-     * @plexus.configuration default-value="false"
-     */
     private boolean implicit = false;
 
-    /**
-     * @plexus.configuration default-value="true"
-     */
     private boolean endpointChecking = true;
+
+    /**
+     * RFC 4217 data channel protection level: {@code P} for a protected data connection, {@code C} for a clear one.
+     * Empty or {@code null} sends no {@code PROT} command at all, which leaves the server on its own default.
+     */
+    private String dataChannelProtection = "P";
 
     @Override
     protected FTPClient createClient() {
@@ -59,5 +58,30 @@ public class FtpsWagon extends FtpWagon {
         FTPSClient client = new FTPSClient(securityProtocol, implicit);
         client.setEndpointCheckingEnabled(endpointChecking);
         return client;
+    }
+
+    public String getDataChannelProtection() {
+        return dataChannelProtection;
+    }
+
+    public void setDataChannelProtection(String dataChannelProtection) {
+        this.dataChannelProtection = dataChannelProtection;
+    }
+
+    /**
+     * Negotiates the data channel protection level. Without this the data connection stays clear even though the
+     * control connection is encrypted, and a server that requires protection answers a transfer with
+     * {@code 425 Server requires protected data connection}.
+     */
+    @Override
+    protected void afterLogin(FTPClient client) throws IOException {
+        if (dataChannelProtection == null || dataChannelProtection.isEmpty()) {
+            return;
+        }
+        LOG.debug("Setting FTPS data channel protection level to [{}].", dataChannelProtection);
+        FTPSClient secureClient = (FTPSClient) client;
+        // PBSZ 0 is what RFC 4217 requires before PROT over TLS
+        secureClient.execPBSZ(0);
+        secureClient.execPROT(dataChannelProtection);
     }
 }

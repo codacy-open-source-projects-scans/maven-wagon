@@ -18,26 +18,19 @@
  */
 package org.apache.maven.wagon.providers.webdav;
 
+import javax.inject.Named;
+
 import java.io.File;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.http.HttpEntity;
 import org.apache.http.HttpException;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.util.EntityUtils;
-import org.apache.jackrabbit.webdav.DavConstants;
-import org.apache.jackrabbit.webdav.DavException;
-import org.apache.jackrabbit.webdav.MultiStatus;
-import org.apache.jackrabbit.webdav.MultiStatusResponse;
-import org.apache.jackrabbit.webdav.client.methods.HttpMkcol;
-import org.apache.jackrabbit.webdav.client.methods.HttpPropfind;
-import org.apache.jackrabbit.webdav.property.DavProperty;
-import org.apache.jackrabbit.webdav.property.DavPropertyName;
-import org.apache.jackrabbit.webdav.property.DavPropertyNameSet;
-import org.apache.jackrabbit.webdav.property.DavPropertySet;
 import org.apache.maven.wagon.PathUtils;
 import org.apache.maven.wagon.ResourceDoesNotExistException;
 import org.apache.maven.wagon.TransferFailedException;
@@ -46,8 +39,11 @@ import org.apache.maven.wagon.authorization.AuthorizationException;
 import org.apache.maven.wagon.repository.Repository;
 import org.apache.maven.wagon.shared.http.AbstractHttpClientWagon;
 import org.codehaus.plexus.util.FileUtils;
-import org.w3c.dom.Node;
 
+import static org.apache.maven.wagon.providers.webdav.DavMethods.DEPTH_0;
+import static org.apache.maven.wagon.providers.webdav.DavMethods.DEPTH_1;
+import static org.apache.maven.wagon.providers.webdav.DavMethods.PROPERTY_DISPLAYNAME;
+import static org.apache.maven.wagon.providers.webdav.DavMethods.PROPERTY_RESOURCETYPE;
 import static org.apache.maven.wagon.shared.http.HttpMessageUtils.formatResourceDoesNotExistMessage;
 
 /**
@@ -59,10 +55,8 @@ import static org.apache.maven.wagon.shared.http.HttpMessageUtils.formatResource
  * @author <a href="mailto:joakime@apache.org">Joakim Erdfelt</a>
  * @author <a href="mailto:carlos@apache.org">Carlos Sanchez</a>
  * @author <a href="mailto:james@atlassian.com">James William Dumay</a>
- * @plexus.component role="org.apache.maven.wagon.Wagon"
- * role-hint="dav"
- * instantiation-strategy="per-lookup"
  */
+@Named("dav")
 public class WebDavWagon extends AbstractHttpClientWagon {
     protected static final String CONTINUE_ON_FAILURE_PROPERTY = "wagon.webdav.continueOnFailure";
 
@@ -114,31 +108,58 @@ public class WebDavWagon extends AbstractHttpClientWagon {
         // create relative path that will always have a leading and trailing slash
         String relpath = FileUtils.normalize(getPath(basedir, dir) + "/");
 
+        mkColPath(baseUrl, relpath);
+    }
+
+    /**
+     * Creates every missing collection along {@code relpath}, one at a time.
+     * <p>
+     * RFC 4918 section 9.3.1 gives MKCOL a small vocabulary, and only two of the answers mean "keep going".
+     * {@code 201 Created} is a collection we made, {@code 405 Method Not Allowed} one that was already there, and
+     * {@code 409 Conflict} says an ancestor is missing -- which is the only reason to step further back. Anything
+     * else, a {@code 403} or an authentication failure for instance, is reported where it happens rather than
+     * being mistaken for a missing parent.
+     *
+     * @param baseUrl scheme, host and port of the repository, without a trailing slash
+     * @param relpath repository-relative path with a leading and trailing slash
+     */
+    void mkColPath(String baseUrl, String relpath) throws IOException {
         PathNavigator navigator = new PathNavigator(relpath);
 
-        // traverse backwards until we hit a directory that already exists (OK/NOT_ALLOWED), or that we were able to
-        // create (CREATED), or until we get to the top of the path
-        int status = -1;
+        // step backwards while the server reports a missing ancestor, until one exists or we create one
+        int status;
         do {
             String url = baseUrl + "/" + navigator.getPath();
             status = doMkCol(url);
             if (status == HttpStatus.SC_CREATED || status == HttpStatus.SC_METHOD_NOT_ALLOWED) {
                 break;
             }
+            if (status != HttpStatus.SC_CONFLICT) {
+                throw new IOException(unableToCreate(url, status));
+            }
         } while (navigator.backward());
+
+        if (status != HttpStatus.SC_CREATED && status != HttpStatus.SC_METHOD_NOT_ALLOWED) {
+            throw new IOException(unableToCreate(baseUrl + "/" + navigator.getPath(), status));
+        }
 
         // traverse forward creating missing directories
         while (navigator.forward()) {
             String url = baseUrl + "/" + navigator.getPath();
             status = doMkCol(url);
-            if (status != HttpStatus.SC_CREATED) {
-                throw new IOException("Unable to create collection: " + url + "; status code = " + status);
+            // a collection that already exists is as good as one we just created
+            if (status != HttpStatus.SC_CREATED && status != HttpStatus.SC_METHOD_NOT_ALLOWED) {
+                throw new IOException(unableToCreate(url, status));
             }
         }
     }
 
-    private int doMkCol(String url) throws IOException {
-        HttpMkcol method = new HttpMkcol(url);
+    private static String unableToCreate(String url, int status) {
+        return "Unable to create collection: " + url + "; status code = " + status;
+    }
+
+    int doMkCol(String url) throws IOException {
+        DavMethods.HttpMkcol method = new DavMethods.HttpMkcol(url);
         try (CloseableHttpResponse closeableHttpResponse = execute(method)) {
             return closeableHttpResponse.getStatusLine().getStatusCode();
         } catch (HttpException e) {
@@ -170,27 +191,15 @@ public class WebDavWagon extends AbstractHttpClientWagon {
         }
     }
 
-    private boolean isDirectory(String url) throws IOException, DavException {
-        DavPropertyNameSet nameSet = new DavPropertyNameSet();
-        nameSet.add(DavPropertyName.create(DavConstants.PROPERTY_RESOURCETYPE));
-
+    private boolean isDirectory(String url) throws IOException {
         CloseableHttpResponse closeableHttpResponse = null;
-        HttpPropfind method = null;
+        DavMethods.HttpPropfind method = null;
         try {
-            method = new HttpPropfind(url, nameSet, DavConstants.DEPTH_0);
+            method = new DavMethods.HttpPropfind(url, PROPERTY_RESOURCETYPE, DEPTH_0);
             closeableHttpResponse = execute(method);
 
-            if (method.succeeded(closeableHttpResponse)) {
-                MultiStatus multiStatus = method.getResponseBodyAsMultiStatus(closeableHttpResponse);
-                MultiStatusResponse response = multiStatus.getResponses()[0];
-                DavPropertySet propertySet = response.getProperties(HttpStatus.SC_OK);
-                DavProperty<?> property = propertySet.get(DavConstants.PROPERTY_RESOURCETYPE);
-                if (property != null) {
-                    Node node = (Node) property.getValue();
-                    return node.getLocalName().equals(DavConstants.XML_COLLECTION);
-                }
-            }
-            return false;
+            List<MultiStatus.Response> responses = readMultiStatus(closeableHttpResponse);
+            return responses != null && !responses.isEmpty() && responses.get(0).isCollection();
         } catch (HttpException e) {
             throw new IOException(e.getMessage(), e);
         } finally {
@@ -209,21 +218,17 @@ public class WebDavWagon extends AbstractHttpClientWagon {
         String repositoryUrl = repository.getUrl();
         String url = repositoryUrl + (repositoryUrl.endsWith("/") ? "" : "/") + destinationDirectory;
 
-        HttpPropfind method = null;
+        DavMethods.HttpPropfind method = null;
         CloseableHttpResponse closeableHttpResponse = null;
         try {
             if (isDirectory(url)) {
-                DavPropertyNameSet nameSet = new DavPropertyNameSet();
-                nameSet.add(DavPropertyName.create(DavConstants.PROPERTY_DISPLAYNAME));
-
-                method = new HttpPropfind(url, nameSet, DavConstants.DEPTH_1);
+                method = new DavMethods.HttpPropfind(url, PROPERTY_DISPLAYNAME, DEPTH_1);
                 closeableHttpResponse = execute(method);
-                if (method.succeeded(closeableHttpResponse)) {
+                List<MultiStatus.Response> responses = readMultiStatus(closeableHttpResponse);
+                if (responses != null) {
                     ArrayList<String> dirs = new ArrayList<>();
-                    MultiStatus multiStatus = method.getResponseBodyAsMultiStatus(closeableHttpResponse);
-                    for (int i = 0; i < multiStatus.getResponses().length; i++) {
-                        MultiStatusResponse response = multiStatus.getResponses()[i];
-                        String entryUrl = response.getHref();
+                    for (int i = 0; i < responses.size(); i++) {
+                        String entryUrl = responses.get(i).getHref();
                         String fileName = PathUtils.filename(URLDecoder.decode(entryUrl));
                         if (entryUrl.endsWith("/")) {
                             if (i == 0) {
@@ -254,8 +259,6 @@ public class WebDavWagon extends AbstractHttpClientWagon {
             }
         } catch (HttpException e) {
             throw new TransferFailedException(e.getMessage(), e);
-        } catch (DavException e) {
-            throw new TransferFailedException(e.getMessage(), e);
         } catch (IOException e) {
             throw new TransferFailedException(e.getMessage(), e);
         } finally {
@@ -274,6 +277,27 @@ public class WebDavWagon extends AbstractHttpClientWagon {
         // FIXME WAGON-580; actually the exception is wrong here; we need an IllegalStateException here
         throw new ResourceDoesNotExistException(
                 "Destination path exists but is not a " + "WebDAV collection (directory): " + url);
+    }
+
+    /**
+     * Reads the body of a PROPFIND response, which is only present when the server answered
+     * {@code 207 Multi-Status}.
+     *
+     * @return the responses, or {@code null} if the status was not {@code 207} and the caller
+     *     should inspect it itself
+     * @throws IOException if the server answered {@code 207} without a body, or with one that
+     *     cannot be parsed
+     */
+    private static List<MultiStatus.Response> readMultiStatus(CloseableHttpResponse response) throws IOException {
+        if (response.getStatusLine().getStatusCode() != HttpStatus.SC_MULTI_STATUS) {
+            return null;
+        }
+        HttpEntity entity = response.getEntity();
+        if (entity == null) {
+            // a transport fault rather than a missing resource, so it must not be reported as one
+            throw new IOException("Multi-Status response has no body");
+        }
+        return MultiStatus.parse(entity.getContent()).getResponses();
     }
 
     public String getURL(Repository repository) {

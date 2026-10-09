@@ -20,8 +20,12 @@ package org.apache.maven.wagon.providers.scm;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+import org.apache.maven.scm.manager.AbstractScmManager;
 import org.apache.maven.scm.manager.plexus.DefaultScmManager;
 import org.apache.maven.scm.provider.ScmProvider;
 import org.apache.maven.wagon.FileTestUtils;
@@ -34,6 +38,8 @@ import org.apache.maven.wagon.authorization.AuthorizationException;
 import org.apache.maven.wagon.repository.Repository;
 import org.apache.maven.wagon.resource.Resource;
 import org.codehaus.plexus.util.FileUtils;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Test for {@link ScmWagon}. You need a subclass for each SCM provider you want to test.
@@ -43,7 +49,7 @@ import org.codehaus.plexus.util.FileUtils;
  */
 public abstract class AbstractScmWagonTest extends WagonTestCase {
 
-    @Override
+    @Test
     public void testWagonPutDirectory() throws Exception {
         super.testWagonPutDirectory();
         // repeat the test on a non-empty repo
@@ -56,7 +62,8 @@ public abstract class AbstractScmWagonTest extends WagonTestCase {
 
     private String providerClassName;
 
-    protected void setUp() throws Exception {
+    @BeforeEach
+    public void setUp() throws Exception {
         super.setUp();
 
         FileUtils.deleteDirectory(getCheckoutDirectory());
@@ -67,6 +74,8 @@ public abstract class AbstractScmWagonTest extends WagonTestCase {
             DefaultScmManager scmManager = (DefaultScmManager) wagon.getScmManager();
 
             if (getScmProvider() != null) {
+                makeScmProvidersMutable(scmManager);
+
                 scmManager.setScmProvider(getScmId(), getScmProvider());
 
                 providerClassName = getScmProvider().getClass().getName();
@@ -77,6 +86,25 @@ public abstract class AbstractScmWagonTest extends WagonTestCase {
 
             wagon.setCheckoutDirectory(getCheckoutDirectory());
         }
+    }
+
+    /**
+     * The container injects AbstractScmManager's provider map as an immutable map, so
+     * {@link org.apache.maven.scm.manager.AbstractScmManager#setScmProvider} cannot register a provider on it.
+     * The map is private with only a protected setter, so swap in a mutable copy reflectively.
+     */
+    private static void makeScmProvidersMutable(DefaultScmManager scmManager) throws Exception {
+        // DefaultScmManager declares a scmProviders field of its own for the injected providers, so target
+        // the one AbstractScmManager.setScmProvider actually writes to rather than walking up from the
+        // runtime class.
+        Field field = AbstractScmManager.class.getDeclaredField("scmProviders");
+
+        field.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, ScmProvider> providers = (Map<String, ScmProvider>) field.get(scmManager);
+
+        field.set(scmManager, providers == null ? new HashMap<>() : new HashMap<>(providers));
     }
 
     /**
